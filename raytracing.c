@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <pthread.h>
 
 #include "math-toolkit.h"
 #include "primitives.h"
@@ -10,6 +11,7 @@
 #define MAX_DISTANCE 1000000000000.0
 #define MIN_DISTANCE 0.00001
 #define SAMPLES 4
+#define PSIZE 4 //make sure it can divied the size of height
 
 #define SQUARE(x) (x * x)
 #define MAX(a, b) (a > b ? a : b)
@@ -22,23 +24,25 @@ static int raySphereIntersection(const point3 ray_e,
                                  const sphere *sph,
                                  intersection *ip, double *t1)
 {
+    //idea: S = (U.T)+-sqrt((U.T)^2 -T^2 + r^2)
+    //U: ray_d, T = Pc - L = sph->center - ray_e
     point3 l;
-    subtract_vector(sph->center, ray_e, l);
-    double s = dot_product(l, ray_d);
-    double l2 = dot_product(l, l);
-    double r2 = sph->radius * sph->radius;
+    subtract_vector(sph->center, ray_e, l); // T = Pc - L
+    double s = dot_product(l, ray_d); // U(ray_d) . T
+    double l2 = dot_product(l, l); // T^2
+    double r2 = sph->radius * sph->radius; // r^2
 
     if (s < 0 && l2 > r2)
         return 0;
-    float m2 = l2 - s * s;
-    if (m2 > r2)
+    float m2 = l2 - s * s; // T^2 - (U.T)^2
+    if (m2 > r2)  // no root
         return 0;
-    float q = sqrt(r2 - m2);
-    *t1 = (l2 > r2) ? (s - q) : (s + q);
+    float q = sqrt(r2 - m2); // sqrt(r^2 - (T^2 - (U.T)))
+    *t1 = (l2 > r2) ? (s - q) : (s + q); // S = (U.T) +- sqrt(...)
+
     /* p = e + t1 * d */
     multiply_vector(ray_d, *t1, ip->point);
     add_vector(ray_e, ip->point, ip->point);
-
     subtract_vector(ip->point, sph->center, ip->normal);
     normalize(ip->normal);
     if (dot_product(ip->normal, ray_d) > 0.0)
@@ -56,9 +60,9 @@ static int rayRectangularIntersection(const point3 ray_e,
     subtract_vector(rec->vertices[1], rec->vertices[0], e01);
     subtract_vector(rec->vertices[3], rec->vertices[0], e03);
 
-    cross_product(ray_d, e03, p);
+    cross_product(ray_d, e03, p); // find the normal p:N
 
-    double det = dot_product(e01, p);
+    double det = dot_product(e01, p); // N.P
 
     /* Reject rays orthagonal to the normal vector.
      * I.e. rays parallell to the plane.
@@ -158,6 +162,7 @@ static void localColor(color local_color,
  * @param l direction of intersection to light
  * @param n surface normal
  */
+// TODO
 static void compute_specular_diffuse(double *diffuse,
                                      double *specular,
                                      const point3 d, const point3 l,
@@ -193,19 +198,19 @@ static void compute_specular_diffuse(double *diffuse,
  * @param d direction of primary ray into intersection
  * @param n surface normal at intersection
  */
-static void reflection(point3 r, const point3 d, const point3 n)
+static void reflection(point3 r, const point3 d, const point3 n, double dn)
 {
     /* r = d - 2(d . n)n */
-    multiply_vector(n, -2.0 * dot_product(d, n), r);
+    multiply_vector(n, -2.0 * dn, r);
     add_vector(r, d, r);
 }
 
 /* reference: https://www.opengl.org/sdk/docs/man/html/refract.xhtml */
 static void refraction(point3 t, const point3 I, const point3 N,
-                       double n1, double n2)
+                       double n1, double n2, double dot_NI)
 {
     double eta = n1 / n2;
-    double dot_NI = dot_product(N,I);
+    //double dot_NI = dot_product(N,I);
     double k = 1.0 - eta * eta * (1.0 - dot_NI * dot_NI);
     if (k < 0.0 || n2 <= 0.0)
         t[0] = t[1] = t[2] = 0.0;
@@ -213,6 +218,7 @@ static void refraction(point3 t, const point3 I, const point3 N,
         point3 tmp;
         multiply_vector(I, eta, t);
         multiply_vector(N, eta * dot_NI + sqrt(k), tmp);
+
         subtract_vector(t, tmp, t);
     }
 }
@@ -253,7 +259,7 @@ static intersection ray_hit_object(const point3 e, const point3 d,
     *hit_rectangular = NULL;
     *hit_sphere = NULL;
 
-    point3 biased_e;
+    point3 biased_e; // biased_e = e + t0 * d;
     multiply_vector(d, t0, biased_e);
     add_vector(biased_e, e, biased_e);
 
@@ -301,13 +307,14 @@ static void rayConstruction(point3 d, const point3 u, const point3 v,
     point3 u_tmp, v_tmp, w_tmp, s;
 
     double w_s = focal;
-    double u_s = xmin + ((xmax - xmin) * (float) i / (width - 1));
-    double v_s = ymax + ((ymin - ymax) * (float) j / (height - 1));
+    double u_s = xmin + ((xmax - xmin) * (float) i / (width - 1)); //相反過來則是左右相反
+    double v_s = ymax + ((ymin - ymax) * (float) j / (height - 1)); //相反過來的話視角就會反過來了ww
 
     /* s = e + u_s * u + v_s * v + w_s * w */
     multiply_vector(u, u_s, u_tmp);
     multiply_vector(v, v_s, v_tmp);
     multiply_vector(w, w_s, w_tmp);
+
     add_vector(view->vrp, u_tmp, s);
     add_vector(s, v_tmp, s);
     add_vector(s, w_tmp, s);
@@ -330,12 +337,12 @@ static void calculateBasisVectors(point3 u, point3 v, point3 w,
 
     /* v = w x u */
     cross_product(u, w, v);
-
     normalize(v);
 }
 
 /* @brief protect color value overflow */
-static void protect_color_overflow(color c)
+static inline __attribute__((always_inline))
+void protect_color_overflow(color c)
 {
     for (int i = 0; i < 3; i++)
         if (c[i] > 1.0) c[i] = 1.0;
@@ -386,7 +393,7 @@ static unsigned int ray_color(const point3 e, double t,
         normalize(_l);
         /* check for intersection with an object. use ignore_me
          * because we don't care about this normal
-        */
+         */
         ray_hit_object(ip.point, _l, MIN_DISTANCE, length(l),
                        rectangulars, &light_hit_rec,
                        spheres, &light_hit_sphere);
@@ -401,7 +408,8 @@ static unsigned int ray_color(const point3 e, double t,
                    diffuse, specular, &fill);
     }
 
-    reflection(r, d, ip.normal);
+    double dot_dn = dot_product(d, ip.normal);
+    reflection(r, d, ip.normal, dot_dn);
     double idx = idx_stack_top(stk).idx, idx_pass = fill.index_of_refraction;
     if (idx_stack_top(stk).obj == hit_obj) {
         idx_stack_pop(stk);
@@ -413,14 +421,14 @@ static unsigned int ray_color(const point3 e, double t,
         idx_stack_push(stk, e);
     }
 
-    refraction(rr, d, ip.normal, idx, idx_pass);
+    refraction(rr, d, ip.normal, idx, idx_pass, dot_dn);
     double R = (fill.T > 0.1) ?
                fresnel(d, rr, ip.normal, idx, idx_pass) :
                1.0;
 
     /* totalColor = localColor +
-                    mix((1-fill.Kd) * fill.R * reflection, T * refraction, R)
-     */
+       mix((1-fill.Kd) * fill.R * reflection, T * refraction, R)
+    */
     if (fill.R > 0) {
         /* if we hit something, add the color */
         int old_top = stk->top;
@@ -453,46 +461,112 @@ static unsigned int ray_color(const point3 e, double t,
 }
 
 /* @param background_color this is not ambient light */
-void raytracing(uint8_t *pixels, color background_color,
-                rectangular_node rectangulars, sphere_node spheres,
-                light_node lights, const viewpoint *view,
-                int width, int height)
+
+
+//void *raytracing(uint8_t *pixels, color background_color,
+//rectangular_node rectangulars, sphere_node spheres,
+//light_node lights, const viewpoint *view,
+//              int width, int height)
+struct thread_args {
+    uint8_t *pixels;
+    light_node lights;
+    rectangular_node rectangulars;
+    sphere_node spheres;
+    color *background_color;
+    const viewpoint *view;
+    int width;
+    int height;
+};
+
+pthread_mutex_t m;
+
+int tk = 0;
+void *thread_ray(void* argument)
 {
+    int step, start;
+    pthread_mutex_lock(&m);
+    step = PSIZE;
+    start = tk;
+    tk++;
+    pthread_mutex_unlock(&m);
+
+    struct thread_args *args = argument;
     point3 u, v, w, d;
     color object_color = { 0.0, 0.0, 0.0 };
 
     /* calculate u, v, w */
-    calculateBasisVectors(u, v, w, view);
+    calculateBasisVectors(u, v, w, args->view);
 
     idx_stack stk;
-
     int factor = sqrt(SAMPLES);
-    for (int j = 0; j < height; j++) {
-        for (int i = 0; i < width; i++) {
+
+    for (int j = start; j < args->height; j+=step) {
+        for (int i = 0 ; i < args->width; i++) {
+            // MSAA
             double r = 0, g = 0, b = 0;
-            /* MSAA */
             for (int s = 0; s < SAMPLES; s++) {
                 idx_stack_init(&stk);
                 rayConstruction(d, u, v, w,
                                 i * factor + s / factor,
                                 j * factor + s % factor,
-                                view,
-                                width * factor, height * factor);
-                if (ray_color(view->vrp, 0.0, d, &stk, rectangulars, spheres,
-                              lights, object_color,
+                                args->view,
+                                args->width * factor, args->height * factor);
+
+                if (ray_color(args->view->vrp, 0.0, d, &stk, args->rectangulars, args->spheres,
+                              args->lights, object_color,
                               MAX_REFLECTION_BOUNCES)) {
+
                     r += object_color[0];
                     g += object_color[1];
                     b += object_color[2];
+
+
                 } else {
-                    r += background_color[0];
-                    g += background_color[1];
-                    b += background_color[2];
+
+                    r += (*args->background_color)[0];
+                    g += (*args->background_color)[1];
+                    b += (*args->background_color)[2];
                 }
-                pixels[((i + (j * width)) * 3) + 0] = r * 255 / SAMPLES;
-                pixels[((i + (j * width)) * 3) + 1] = g * 255 / SAMPLES;
-                pixels[((i + (j * width)) * 3) + 2] = b * 255 / SAMPLES;
+
+                args->pixels[((i + (j * args->width)) * 3) + 0] = r * 255 / SAMPLES;
+                args->pixels[((i + (j * args->width)) * 3) + 1] = g * 255 / SAMPLES;
+                args->pixels[((i + (j * args->width)) * 3) + 2] = b * 255 / SAMPLES;
             }
         }
     }
+
+    pthread_exit(NULL);
+}
+
+
+typedef struct pthread_struct {
+    pthread_t p[PSIZE];
+} pt_struct;
+
+void raytracing(uint8_t *pixels, color background_color,
+                rectangular_node rectangulars, sphere_node spheres,
+                light_node lights, const viewpoint *view,
+                int width, int height)
+{
+    pt_struct pt_threads;
+    struct thread_args argument;
+    //settting pthread argument
+    argument.background_color = (color*)background_color;
+    argument.pixels = pixels;
+    argument.rectangulars = rectangulars;
+    argument.spheres = spheres;
+    argument.lights = lights;
+    argument.view = view;
+    argument.width = width;
+    argument.height = height;
+
+    pthread_mutex_init(&m, NULL);
+
+    for(int i = 0; i < PSIZE; i++) {
+        pthread_create(&pt_threads.p[i], NULL, thread_ray, &argument);
+    }
+    for(int i = 0; i < PSIZE; i++) {
+        pthread_join(pt_threads.p[i], NULL);
+    }
+
 }

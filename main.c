@@ -57,7 +57,6 @@ int main()
         write_to_ppm(outfile, pixels, ROWS, COLS);
         fclose(outfile);
     }
-
     delete_rectangular_list(&rectangulars);
     delete_sphere_list(&spheres);
     delete_light_list(&lights);

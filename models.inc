@@ -62,7 +62,7 @@ rectangular rectangular1 = {
     },
     .normal = { 0.0, 1.0, 0.0 },
     .rectangular_fill = {
-        .fill_color = { 0.6, 0.6, 0.6 },
+        .fill_color = { 0.5, 0.5, 0.5 },
         .Kd = 0.8, .Ks = 0.0, .T = 0.0, .R = 0.5,
         .index_of_refraction = 0.0, .phong_power = 5.0,
     },
