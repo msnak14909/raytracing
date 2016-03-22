@@ -43,7 +43,7 @@ int main()
 #include "use-models.h"
 
     /* allocate by the given resolution */
-    pixels = malloc(sizeof(unsigned char) * ROWS * COLS * 3);
+    pixels = calloc(sizeof(unsigned char),ROWS * COLS * 3);
     if (!pixels) exit(-1);
 
     printf("# Rendering scene\n");

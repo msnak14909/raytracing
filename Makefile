@@ -6,7 +6,7 @@ CC ?= gcc
 CFLAGS = \
 	-std=gnu99 -Wall -O0 -g -DNDEBUG -pthread
 LDFLAGS = \
-	-lm
+	-lm -pthread
 
 XDOT = ~/xdot.py/xdot.py
 GPROF2DOT = ~/gprof2dot/gprof2dot.py
@@ -14,7 +14,7 @@ GPROF2DOT = ~/gprof2dot/gprof2dot.py
 ifeq ($(strip $(PROFILE)),1)
 PROF_FLAGS = -pg
 CFLAGS += $(PROF_FLAGS)
-LDFLAGS += $(PROF_FLAGS) 
+LDFLAGS += $(PROF_FLAGS)
 endif
 
 OBJS := \
@@ -27,7 +27,7 @@ OBJS := \
 
 
 $(EXEC): $(OBJS)
-	$(CC) -o $@ $^ $(LDFLAGS) -pthread
+	$(CC) -o $@ $^ $(LDFLAGS)
 
 main.c: use-models.h
 use-models.h: models.inc Makefile
